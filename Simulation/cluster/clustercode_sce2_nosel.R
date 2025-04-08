@@ -33,20 +33,20 @@ Exp_mat_y= dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,
 
 
 fitkm_l1 <- kmbayes(y = L1, Z = Exp_mat_l1, X = Cov_mat_l1, iter = 12000, verbose = FALSE, varsel =FALSE)
-saveRDS(fitkm_l1, file = paste0("fitkm_l1_", currind, ".rds"))
+saveRDS(fitkm_l1, file = paste0("s6_result/fitkm_l1_", currind, ".rds"))
  #
  #
-  fitkm_y <- kmbayes(y = Y, Z = Exp_mat_y, X = Cov_mat_y, iter = 12000, verbose = FALSE, varsel = FALSE)
- saveRDS(fitkm_y, file = paste0("fitkm_y_", currind, ".rds"))
+fitkm_y <- kmbayes(y = Y, Z = Exp_mat_y, X = Cov_mat_y, iter = 12000, verbose = FALSE, varsel = FALSE)
+saveRDS(fitkm_y, file = paste0("s6_result/fitkm_y_", currind, ".rds"))
 
 #fitkm_l1 <- readRDS(paste0("fitkm_l1_", currind, ".rds"))
-# fitkm_l2 <- readRDS(paste0("fitkm_l2_", currind, ".rds"))
+#fitkm_l2 <- readRDS(paste0("fitkm_l2_", currind, ".rds"))
 #fitkm_y <- readRDS(paste0("fitkm_y_", currind, ".rds"))
 
-  start.time <- proc.time()
+start.time <- proc.time()
 K = 1000
 
- A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
 
 a <-   apply(A, 2, quantile, probs=0.25)
 astar <-   apply(A, 2, quantile, probs=0.75)
@@ -100,8 +100,8 @@ for(j in 1:length(sel)){
 YaLa         <- apply(YaLa.samp.mat,        1,mean)
 YastarLastar <- apply(YastarLastar.samp.mat,1,mean)
 
-saveRDS( YaLa, paste0("YaLa_", currind, ".rds"))
-saveRDS( YastarLastar, paste0("YastarLastar_", currind, ".rds"))
+saveRDS( YaLa, paste0("s6_result/YaLa_", currind, ".rds"))
+saveRDS( YastarLastar, paste0("s6_result/YastarLastar_", currind, ".rds"))
 
 ##g-BKMR
 diff_gBKMR = mean(YastarLastar) - mean(YaLa)
@@ -111,7 +111,7 @@ para_l1 = apply(fitkm_l1$beta[6000:12000,],2,mean)
 para_y = apply(fitkm_y$beta[6000:12000,],2,mean)
 para_l1l2y = c( para_l1,  para_y)
 
-write.csv(para_l1l2y, file = paste0("para_res", currind, ".csv"))
+write.csv(para_l1l2y, file = paste0("s6_result/para_res", currind, ".csv"))
 
 
 #####g-formula
@@ -233,7 +233,7 @@ sim_res[1] <-  diff_gBKMR
 sim_res[2] <- diff_gform
 sim_res[3] <- diff_lm
 
-write.csv(sim_res, file = paste0("Sim_res", currind, ".csv"))
+write.csv(sim_res, file = paste0("s6_result/Sim_res", currind, ".csv"))
 
 
 
@@ -242,7 +242,7 @@ risks_singvar_l1 <- SingVarRiskSummaries(fit = fitkm_l1, y = L1, Z = Exp_mat_l1,
                                          qs.diff = c(0.25,0.75),
                                          q.fixed = c( 0.25, 0.5, 0.75),
                                          method = "exact")
-saveRDS(risks_singvar_l1, file = paste0("risks_singvar_l1_", currind, ".rds"))
+saveRDS(risks_singvar_l1, file = paste0("s6_result/risks_singvar_l1_", currind, ".rds"))
 
 
 risks_singvar_y <- SingVarRiskSummaries(fit = fitkm_y, y = Y, Z = Exp_mat_y, X = as.matrix(Cov_mat_y),
@@ -250,7 +250,7 @@ risks_singvar_y <- SingVarRiskSummaries(fit = fitkm_y, y = Y, Z = Exp_mat_y, X =
                                         q.fixed = c( 0.25,0.5, 0.75),
                                         method = "exact")
 
-saveRDS(risks_singvar_y, file = paste0("risks_singvar_y_", currind, ".rds"))
+saveRDS(risks_singvar_y, file = paste0("s6_result/risks_singvar_y_", currind, ".rds"))
 
 
 

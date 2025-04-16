@@ -1,0 +1,105 @@
+---
+title: "SCE1 gbkmr noselection summarization"
+author: "Zilan Chai"
+date: '2022-10-11'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(lubridate)
+library(dplyr)
+library(data.table)
+library(ggplot2) 
+library(haven)
+library(dplyr)
+library(readstata13) 
+library(corrplot)
+library(mice)
+library(pastecs)
+#library(bkmr) 
+library(knitr)
+```
+
+```{r}
+setwd("/Users/zilanchai/Docs/FinalSimSettings/SCE4_nosel") 
+```
+
+This script summarizes the Estimate, Bias, Relative Bias,  MSE, Coverage, of `gbkmr with no variable selection` for Scenario 4.  
+
+```{r} 
+YaLa = c()
+YastarLastar = c()
+
+for (i in 1:500) {
+  file = paste0("YaLa_", i,".rds")
+  path = file.path(file)
+  if(file.exists(path)==FALSE)   {
+    next
+  }
+  temp = readRDS(paste0("YaLa_", i, ".rds"))
+  YaLa[i] = mean(temp)
+}
+
+for (i in 1:500) {
+  file = paste0("YastarLastar_", i,".rds")
+  path = file.path(file)
+  if(file.exists(path)==FALSE)   {
+    next
+  }
+  temp = readRDS(paste0("YastarLastar_", i, ".rds"))
+  YastarLastar[i] = mean(temp)
+}
+
+```
+
+
+```{r}
+diff_True = -0.0746417
+
+diff_gbkmr = YastarLastar - YaLa
+
+est = mean(diff_gbkmr)
+
+bias = est - diff_True
+var = var(diff_gbkmr)
+RelativeBias = bias/diff_True
+
+MSE = bias^2 + var
+
+inInterval = c()
+
+ fun <- function(diff_True){
+  for (i in 1:500) {
+    file_a = paste0("YaLa_", i,".rds")
+    path_a = file.path(file_a)
+  
+  file_astar = paste0("YastarLastar_", i,".rds")
+  path_astar = file.path(file_astar)
+  
+  
+  if(file.exists(path_a)==FALSE || file.exists(path_astar)==FALSE ) { 
+    next  
+  }
+  
+  YaLa_temp = readRDS(file_a)
+  YastarLastar_temp = readRDS(file_astar)
+  diff_tmp = YastarLastar_temp - YaLa_temp 
+   
+  upper = quantile(diff_tmp, .975) 
+  lower = quantile(diff_tmp, .025) 
+  t=sum(upper >= diff_True & lower <= diff_True)
+  inInterval = c(inInterval, t) 
+  } 
+   
+   
+coverage = mean(inInterval)
+return(coverage)
+}
+
+coverage_gBKMRnosel = fun(diff_True)
+
+
+cbind(est, bias,RelativeBias,  var, MSE, coverage_gBKMRnosel)
+``` 

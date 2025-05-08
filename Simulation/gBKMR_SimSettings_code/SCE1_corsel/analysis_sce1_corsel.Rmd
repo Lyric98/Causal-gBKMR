@@ -1,0 +1,1021 @@
+---
+title: "Analysis SCE1 Corsel"
+author: "Zilan Chai"
+date: "10/2022"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(lubridate)
+library(dplyr)
+library(data.table)
+library(ggplot2) 
+library(haven)
+library(dplyr)
+library(readstata13) 
+library(corrplot)
+library(mice)
+library(pastecs)
+#library(bkmr) 
+library(knitr)
+
+setwd("/Users/zilanchai/Docs/FinalSimSettings/SCE1_corsel")
+sim_popn <- readRDS("popn_highcor_nonlinearLY_3.rds")  
+```
+
+
++ sample size: n = 500
++ MCMC iteration: 12k for all 2 models (L1, Y)
++ Low Variance. 
++ High Correlation.  
++ 3 Metals
++ Nonlinear effect on Y. 
+
+# 1. Generate a simple 1M population 
+ 
+$$L = 0.25*logM_{1,0} + 0.25*\text{wasit}_0 + \epsilon\\
+Y = 1 + 0.1*(\text{sex}-1)^2 + 0.25*(logM_{1,0}-1)^2 + 0.25*logM_{2,1} + 0.25*(\text{waist}_1-1)^2 + \frac{1}{3} * (logM_{2,1}-1) *(\text{waist}_1 -1)  + \epsilon$$
+
+
+```{r eval = FALSE}
+rm(list = ls())
+
+library(SimDesign)
+library(dplyr)
+library(gfoRmula)
+library(corrplot)
+
+popN = 1000000
+k = popN
+#covmat <-  toeplitz(c(1, .2, .1))
+ covmat <-  toeplitz(c(1, .3, .2))
+
+sigsq.trueL = 1
+sigsq.trueY = 1 
+
+set.seed(1)
+
+
+dat <- list(At0 = rmvnorm(k, rep(0,ncol(covmat)), sigma = covmat))
+colnames(dat$At0) <- paste("At0_",1:ncol(covmat),sep="") 
+
+dat$sex = rbinom(k, 1, 0.5)
+dat$C0 = rnorm(k, mean = 0.25*(1-dat$sex) , 1)
+
+# cor(dat$At1)
+
+dat$epsL <- rnorm(k, sd=sqrt(sigsq.trueL))
+dat$epsY <- rnorm(k, sd=sqrt(sigsq.trueY))
+
+hfunL = function(z, ind1 = 1 ,ind2 = 4) 1/4*z[ind1] + 1/4*z[ind2] 
+hfunY = function(z, ind1 = 1, ind2 = 5, ind3= 7,ind4= 8) {
+  (1/10*(z[ind1]-1)^2 +1/4*(z[ind2]-1)^2+1/4*z[ind3]+ 1/4*(z[ind4]-1)^2) + 1/3*(z[ind2]-1)*(z[ind3]-1)+1 }
+
+dat$hL   <- apply(cbind(dat$At0,dat$C0), 1, hfunL)
+dat$L    <- with(dat, hL + epsL)
+
+
+# At1_mean = c(1/3*mean(dat$At0[,1])+0.1*mean(dat$C0)+10*mean(dat$L),
+#              1/3*mean(dat$At0[,2])+0.1*mean(dat$C0)+10*mean(dat$L),
+#              1/3*mean(dat$At0[,3])+0.1*mean(dat$C0)+10*mean(dat$L))
+# dat$At1  = rmvnorm(k, mean =   At1_mean, sigma = covmat)
+
+
+sigsq.trueA1= .1
+dat$hAt1 = cbind(At1_1 = 1/3*dat$At0[,1]^2 +1/6*dat$At0[,1]+1/10*dat$C0 + 1/10*dat$L,
+                 At1_2 = 1/3*dat$At0[,2]^2 +1/6*dat$At0[,2]+1/10*dat$C0 + 1/10*dat$L,
+                 At1_3 = 1/3*dat$At0[,3]^2 +1/6*dat$At0[,3]+1/10*dat$C0 + 1/10*dat$L)
+dat$epsAt1 <- rnorm(k,  sd=sqrt(sigsq.trueA1))
+dat$At1    <- with(dat, hAt1 + epsAt1)
+colnames(dat$At1) <- paste("At1_",1:ncol(covmat),sep="") 
+
+dat$A0A1L   <- cbind(dat$At0,dat$At1,dat$L,dat$sex, dat$C0) 
+
+dat$hY   <- apply(dat$A0A1L, 1, hfunY ) 
+#  dim(dat$A0A1L)
+dat$y    <- with(dat, hY + epsY)
+
+dat$data <- data.frame(with(dat, cbind(sex, C0, At0,At1, L, y)))  
+
+
+
+df=dat$data 
+df$id = c(1:1000000)
+colnames(df) <- c("sex","waist0", 'logM1_0', 'logM2_0' ,'logM3_0', 
+                  'logM1_1', 'logM2_1','logM3_1','waist1','Y','id')
+
+
+t = cor(df)
+corrplot(t)
+saveRDS(df, "popn_highcor_nonlinearLY_3.rds")
+```
+
+### Simulated Population Correlation Matrix
+
+The corrlation between three metals at time point 1 is 0.3, 0.3, 0.2.
+
+The maximum correlation coefficient in this matrix is 0.38.
+
+```{r}
+M = cor(sim_popn)
+#cor(sim_popn)
+corrplot(M, type = "upper")  
+```
+
+# 2. Process Simulation Results
+
+```{r include = FALSE, cache=TRUE} 
+SimRes = c()
+
+for (i in 1:500) {
+  file = paste0("Sim_res", i,".csv")
+  path = file.path(file)
+  if(file.exists(path)==FALSE)   { 
+    next  
+  }
+  temp = read.csv(paste0("Sim_res", i, ".csv"))
+  tmp2 = t(temp)[2,]
+  SimRes = rbind(SimRes, tmp2)
+  
+}
+ 
+
+para_res= c()
+
+for (i in 1:500) {
+  file = paste0("para_res", i,".csv")
+  path = file.path(file)
+  if(file.exists(path)==FALSE)   {
+    next
+  }
+  temp = read.csv(paste0("para_res", i, ".csv"))
+  tmp2 = t(temp)[2,]
+  para_res = rbind(para_res, tmp2)
+
+}
+
+
+#tbl = apply(para_res, 2, mean)
+#kable(tbl)
+
+
+gfun <- function(dat_sim){ 
+  lm_l1 <-  lm(waist1 ~  as.factor(sex)   +waist0 +
+                 logM1_0+logM2_0+logM3_0 , dat = dat_sim)
+  
+  lm_y <-  lm(Y ~  as.factor(sex)   +waist0 +waist1 +
+                logM1_0+logM2_0+logM3_0+logM1_1+logM2_1+logM3_1 , dat = dat_sim)
+  
+  K = 1000
+  
+  A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+  
+  a <-   apply(A, 2, quantile, probs=0.25)
+  astar <-   apply(A, 2, quantile, probs=0.75)
+  
+  # Calculate L_a*
+  
+  tmp = rbind(c(0, mean(dat_sim$waist0), a[1:3]), 
+              c(0, mean(dat_sim$waist0), astar[1:3])) 
+  
+  
+  newdat_l1 = as.data.frame(tmp)
+  colnames(newdat_l1) <- c("sex", "waist0", 'logM1_0', 'logM2_0' ,'logM3_0')
+  La.true <- predict(lm_l1, newdata = newdat_l1)[1]
+  Lastar.true <- predict(lm_l1, newdata = newdat_l1)[2]
+  
+  K = 1000
+  sigma.samp   <- summary(lm_l1)$sigma
+  
+  La.samp      <- La.true     + rnorm(K, sd=sigma.samp) 
+  Lastar.samp  <- Lastar.true + rnorm(K, sd=sigma.samp) 
+  
+  
+  YaLa.samp         <- cbind(0, mean(dat_sim$waist0), La.samp,     matrix(a, nrow=K, ncol=length(a), byrow=TRUE))
+  YastarLastar.samp <- cbind(0, mean(dat_sim$waist0), Lastar.samp, matrix(astar, nrow=K, ncol=length(a), byrow=TRUE))
+  
+  newdat_YaLa <- as.data.frame(YaLa.samp)
+  colnames(newdat_YaLa) <- c("sex", "waist0",'waist1', 'logM1_0', 'logM2_0' ,'logM3_0', 'logM1_1', 'logM2_1','logM3_1')
+  
+  newdat_YastarLastar <- as.data.frame(YastarLastar.samp)
+  colnames(newdat_YastarLastar) <- c("sex", "waist0",'waist1', 'logM1_0', 'logM2_0' ,'logM3_0', 'logM1_1', 'logM2_1','logM3_1')
+  
+  
+  YaLa.pred   <- predict(lm_y, newdata = newdat_YaLa)
+  YastarLastar.pred <- predict(lm_y, newdata = newdat_YastarLastar)
+  
+  YaLa         <- mean(YaLa.pred)
+  YastarLastar <- mean(YastarLastar.pred)
+  
+  truth_gformula = mean(YastarLastar) - mean(YaLa) 
+  return(truth_gformula)
+  
+}
+ 
+
+gfuncorrectmodel <- function(dat_sim){
+  
+dat_sim <- mutate(dat_sim, waist1_logM2 = waist1*logM2_1, waist1_sq = waist1^2, logM2_1_sq = logM2_1^2)
+
+lm_l1 <-  lm(waist1 ~ waist0 + logM1_0, dat = dat_sim)
+lm_y <-  lm(Y ~  as.factor(sex) + waist1 + logM1_0 + logM2_1 + waist1_logM2 + waist1_sq + logM2_1_sq, dat = dat_sim)
+
+A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+
+a <-   apply(A, 2, quantile, probs=0.25)
+astar <-   apply(A, 2, quantile, probs=0.75)
+
+# Calculate L_a*
+
+tmp_a = cbind(dat_sim$waist0, a[1]) %>% as.data.frame()
+colnames(tmp_a) <- c("waist0", 'logM1_0')
+
+tmp_astar = cbind(dat_sim$waist0, astar[1]) %>% as.data.frame()
+colnames(tmp_astar) <- c("waist0", 'logM1_0')
+ 
+La.true <- predict(lm_l1, newdata = tmp_a)
+Lastar.true <- predict(lm_l1, newdata = tmp_astar)
+
+K = 1000
+sigma.samp   <- summary(lm_l1)$sigma
+
+La.samp      <- La.true     + rnorm(K, sd=sigma.samp) 
+Lastar.samp  <- Lastar.true + rnorm(K, sd=sigma.samp) 
+
+
+YaLa.samp   <- cbind(dat_sim$sex,  La.samp, a[1], a[5], a[5]*La.samp, a[5]^2,  La.samp^2)
+YastarLastar.samp   <- cbind(dat_sim$sex,  Lastar.samp, astar[1], astar[5], astar[5]*Lastar.samp, astar[5]^2, Lastar.samp^2)
+
+newdat_YaLa <- as.data.frame(YaLa.samp)
+colnames(newdat_YaLa) <- c("sex", 'waist1', 'logM1_0',  'logM2_1', 'waist1_logM2', 'logM2_1_sq', 'waist1_sq')
+
+newdat_YastarLastar <- as.data.frame(YastarLastar.samp)
+colnames(newdat_YastarLastar) <-  c("sex", 'waist1', 'logM1_0',  'logM2_1', 'waist1_logM2', 'logM2_1_sq', 'waist1_sq')
+
+
+YaLa.pred   <- predict(lm_y, newdata = newdat_YaLa)
+YastarLastar.pred <- predict(lm_y, newdata = newdat_YastarLastar)
+
+YaLa         <- mean(YaLa.pred)
+YastarLastar <- mean(YastarLastar.pred)
+
+diff_gformula = mean(YastarLastar) - mean(YaLa) 
+diff_gformula 
+  
+}
+
+n = 500
+
+gform_diff_samp <- rep(NA, 500)
+gform_correct_samp <- rep(NA, 500)
+
+for (i in 1:500){
+  set.seed(i)
+  dat_sim = sim_popn[sample(sim_popn$id, n, replace=F),] 
+  gform_diff_samp[i] <- gfun(dat_sim)
+  gform_correct_samp[i] <- gfuncorrectmodel(dat_sim)
+}  
+
+SimRes[,2] <- gform_diff_samp
+SimRes  <- cbind(SimRes, gform_correct_samp) 
+
+```
+ 
+ 
+# 3. True Effect - Direct Method
+
+```{r cache=TRUE} 
+k = 1000000
+sigsq.trueL = 1
+
+hfunL = function(z, ind1 = 1 ,ind2 = 4) 1/4*z[ind1] + 1/4*z[ind2]
+hfunY = function(z, ind1 = 1, ind2 = 5, ind3= 7,ind4= 8) 1/10*(z[ind1]-1)^2 +1/4*(z[ind2]-1)^2+1/4*z[ind3]+ 1/4*(z[ind4]-1)^2 + 1/3*(z[ind2]-1)*(z[ind3]-1)+1
+
+ 
+A <- dplyr::select(sim_popn, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+
+a <-   apply(A, 2, quantile, probs=0.25)
+astar <-   apply(A, 2, quantile, probs=0.75)
+
+a_c0 <- cbind(matrix(a, nrow = k, ncol = length(a), byrow = TRUE), sim_popn$waist0)
+astar_c0 <- cbind(matrix(astar, nrow = k, ncol = length(a), byrow = TRUE), sim_popn$waist0)
+
+La.true <- apply(a_c0[,c(1:3, 7)], 1, hfunL )
+Lastar.true <- apply(astar_c0[,c(1:3, 7)], 1, hfunL )
+
+La      <- La.true     + rnorm(k, sd=sqrt(sigsq.trueL)) 
+Lastar  <- Lastar.true + rnorm(k, sd=sqrt(sigsq.trueL)) 
+
+
+baLa         <- cbind(matrix(a,nrow=k,ncol=length(a),     byrow=TRUE), La, sim_popn$sex, sim_popn$waist0)
+bastarLastar <- cbind(matrix(astar,nrow=k,ncol=length(a), byrow=TRUE), Lastar, sim_popn$sex, sim_popn$waist0)
+  
+YaLa         <- mean(apply(baLa,         1, hfunY)) 
+YastarLastar <- mean(apply(bastarLastar, 1, hfunY))
+
+truth_direct = YastarLastar-YaLa
+truth_direct
+
+```
+
+
+## True Effect - Parametric G-formula with correct model specification on population
+
+```{r  cache=TRUE} 
+# dat_sim = sim_popn
+# lm_l1 <-  lm(waist1 ~ waist0 + logM1_0, dat = dat_sim)
+# 
+# dat_sim <- mutate(dat_sim, waist1_logM2 = waist1*logM2_1, waist1_sq = waist1^2, logM2_1_sq = logM2_1^2)
+# 
+# lm_y <-  lm(Y ~  as.factor(sex) + waist1 + logM1_0 + logM2_1 + waist1_logM2 + waist1_sq + logM2_1_sq, dat = dat_sim)
+# 
+# A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+# 
+# a <-   apply(A, 2, quantile, probs=0.25)
+# astar <-   apply(A, 2, quantile, probs=0.75)
+# 
+# # Calculate L_a*
+# 
+# tmp_a = cbind(dat_sim$waist0, a[1]) %>% as.data.frame()
+# colnames(tmp_a) <- c("waist0", 'logM1_0')
+# 
+# tmp_astar = cbind(dat_sim$waist0, astar[1]) %>% as.data.frame()
+# colnames(tmp_astar) <- c("waist0", 'logM1_0')
+#  
+# La.true <- predict(lm_l1, newdata = tmp_a)
+# Lastar.true <- predict(lm_l1, newdata = tmp_astar)
+# 
+# K = 1000000
+# sigma.samp   <- summary(lm_l1)$sigma
+# 
+# La.samp      <- La.true     + rnorm(K, sd=sigma.samp) 
+# Lastar.samp  <- Lastar.true + rnorm(K, sd=sigma.samp) 
+# 
+# 
+# YaLa.samp   <- cbind(dat_sim$sex,  La.samp, a[1], a[5], a[5]*La.samp, a[5]^2,  La.samp^2)
+# YastarLastar.samp   <- cbind(dat_sim$sex,  Lastar.samp, astar[1], astar[5], astar[5]*Lastar.samp, astar[5]^2, Lastar.samp^2)
+# 
+# newdat_YaLa <- as.data.frame(YaLa.samp)
+# colnames(newdat_YaLa) <- c("sex", 'waist1', 'logM1_0',  'logM2_1', 'waist1_logM2', 'logM2_1_sq', 'waist1_sq')
+# 
+# newdat_YastarLastar <- as.data.frame(YastarLastar.samp)
+# colnames(newdat_YastarLastar) <-  c("sex", 'waist1', 'logM1_0',  'logM2_1', 'waist1_logM2', 'logM2_1_sq', 'waist1_sq')
+# 
+# 
+# YaLa.pred   <- predict(lm_y, newdata = newdat_YaLa)
+# YastarLastar.pred <- predict(lm_y, newdata = newdat_YastarLastar)
+# 
+# YaLa         <- mean(YaLa.pred)
+# YastarLastar <- mean(YastarLastar.pred)
+# 
+# truth_gformula = mean(YastarLastar) - mean(YaLa) 
+
+
+truth_gformula=  gfuncorrectmodel(sim_popn) 
+truth_gformula
+#-0.7108191
+```
+
+# 4.Coverage 
+## Coverage for gBKMR
+
+
+```{r}
+diff_True =  -0.7207878 
+```
+
+```{r}
+diff_bkmr_group = c()
+
+ fun <- function(diff_True){
+  for (i in 1:500) {
+    file_a = paste0("YaLa_", i,".rds")
+    path_a = file.path(file_a)
+  
+  file_astar = paste0("YastarLastar_", i,".rds")
+  path_astar = file.path(file_astar)
+  
+  
+  if(file.exists(path_a)==FALSE || file.exists(path_astar)==FALSE ) { 
+    next  
+  }
+  YaLa_temp = readRDS(file_a)
+  YastarLastar_temp = readRDS(file_astar)
+  diff_tmp = YastarLastar_temp - YaLa_temp 
+   
+  upper = quantile(diff_tmp, .975) 
+  lower = quantile(diff_tmp, .025) 
+  t = sum(upper >= diff_True & lower <= diff_True)
+  diff_bkmr_group = c(diff_bkmr_group, t) 
+} 
+coverage = mean(diff_bkmr_group)
+return(coverage)
+}
+
+coverage_gBKMR = fun(diff_True)
+coverage_gBKMR 
+``` 
+
+## Coverage for LM, gformula, gformula with correct models
+
+```{r}
+# function for LM 
+lmfun <- function(dat_sim){
+lm_model = lm(Y ~  as.factor(sex)   +waist0 +waist1 +
+                logM1_0+logM2_0+logM3_0+logM1_1+logM2_1+logM3_1 , dat = dat_sim)
+summary(lm_model)
+newdat_25 <- data.frame(  sex = as.factor(0), 
+                        logM1_0 = quantile(dat_sim$logM1_0)[2],
+                        logM1_1 = quantile(dat_sim$logM1_1)[2], 
+                        logM2_0 = quantile(dat_sim$logM2_0)[2],
+                        logM2_1 = quantile(dat_sim$logM2_1)[2], 
+                        logM3_0 = quantile(dat_sim$logM3_0)[2],
+                        logM3_1 = quantile(dat_sim$logM3_1)[2], 
+                        waist0 = mean(dat_sim$waist0),
+                        waist1 = mean(dat_sim$waist1) 
+)
+
+newdat_75 <- data.frame( sex = as.factor(0), 
+                        logM1_0 = quantile(dat_sim$logM1_0)[4],
+                        logM1_1 = quantile(dat_sim$logM1_1)[4], 
+                        logM2_0 = quantile(dat_sim$logM2_0)[4],
+                        logM2_1 = quantile(dat_sim$logM2_1)[4], 
+                        logM3_0 = quantile(dat_sim$logM3_0)[4],
+                        logM3_1 = quantile(dat_sim$logM3_1)[4], 
+                        waist0 = mean(dat_sim$waist0),
+                        waist1 = mean(dat_sim$waist1) )
+yhat_lm_25 = predict(lm_model, newdat_25 )
+yhat_lm_75 = predict(lm_model, newdat_75 )
+diff_lm = yhat_lm_75-yhat_lm_25
+
+return(diff_lm)  
+
+}
+
+## Bootstarp function
+boot <- function(truth, dat_sim, nboot=1000) {
+  t <- matrix(NA, nboot, 3)
+  for(B in 1:nboot) {
+    index <- sample(1:500, replace=T)
+    boot.dat <- dat_sim[index,]
+    
+    t[B, 1] <- gfun(boot.dat)
+    t[B, 2] <- gfuncorrectmodel(boot.dat)
+    t[B, 3] <- lmfun(boot.dat)
+  }
+  return(t)
+}
+
+```
+
+
+
+```{r cache=TRUE,eval=FALSE}
+## Coverage
+
+coverage_gfun_list <- c()
+coverage_gfuncorr_list <- c()
+coverage_lm_list <- c()
+
+n = 500 
+ 
+for (i in 1:500){
+  print(i)
+  set.seed(i)
+  dat_sim = sim_popn[sample(sim_popn$id, n, replace=F),] 
+
+  t <- boot(diff_true, dat_sim, nboot=1000)
+    
+  in_gfun <- sum(quantile(t[, 1], 0.975)>= diff_True & quantile(t[, 1], 0.025) <= diff_True)
+  in_gfuncorr <- sum(quantile(t[, 2], 0.975)>= diff_True & quantile(t[, 2], 0.025) <= diff_True)
+  in_lm <- sum(quantile(t[, 3], 0.975)>= diff_True & quantile(t[, 3], 0.025) <= diff_True)
+  
+  coverage_gfun_list <- c(coverage_gfun_list, in_gfun)
+  coverage_gfuncorr_list <- c(coverage_gfuncorr_list, in_gfuncorr)
+  coverage_lm_list <- c(coverage_lm_list, in_lm)
+  
+  coverage_gfun <- mean(coverage_gfun_list)
+  coverage_gfuncorr <- mean(coverage_gfuncorr_list) 
+  coverage_lm <- mean(coverage_lm_list)
+}  
+
+```
+
+
+```{r}
+ResCov = c()
+
+for (i in 1:500) {
+  file = paste0("coverage_single", i,".csv")
+  path = file.path(file)
+  if(file.exists(path)==FALSE)   { 
+    next  
+  }
+  temp = read.csv(paste0("coverage_single", i, ".csv"))
+  tmp2 = t(temp)[2,]
+  ResCov = rbind(ResCov, tmp2)
+  
+}
+
+  coverage_gfun <- mean(ResCov[,1])
+  coverage_gfuncorr <- mean(ResCov[,2]) 
+  coverage_lm <- mean(ResCov[,3])
+
+res = c(coverage_gfun, coverage_gfuncorr, coverage_lm)
+print(res)
+# Print results
+```
+
+
+# 5. Simulation Results and plotting (comparing gBKMR, gformula, LR)
+```{r} 
+colnames(SimRes) <- c("diff_gBKMR", "diff_gform", "diff_lm", "gform_correct")
+
+est = apply(SimRes, 2, mean)
+
+bias = abs(est - diff_True)
+var = apply(SimRes, 2, var) 
+RelativeBias = abs(bias/diff_True)
+
+MSE = bias^2 + var
+
+simulation_res = as.data.frame(rbind(bias, RelativeBias, var, MSE))
+
+colnames(simulation_res) <-c("diff_gBKMR", "diff_gform", "diff_lm", "gform_correct")
+kable(simulation_res)
+
+
+
+colors <- c("black","gray25","gray50","darkorchid4","darkorchid3","dodgerblue4","dodgerblue3","darkseagreen4","darkseagreen3","orange2","firebrick2") 
+
+## Note: These numbers (results are from another R file : sim_mar1.Rmd)
+
+plotbias =  c( diff_gBKMR=simulation_res[1, 1], diff_lm = simulation_res[1, 3], diff_gform = simulation_res[1, 2], gfrom_correct = simulation_res[1, 4], gBKMR_nosel = -0.004389606,gBKMR_group =  -0.02367004)
+plotbias =  stack(plotbias)
+
+plotrelbias =  c( diff_gBKMR=simulation_res[2, 1], diff_lm = simulation_res[2, 3], diff_gform = simulation_res[2, 2], gfrom_correct = simulation_res[2, 4],gBKMR_nosel = 0.006090011, gBKMR_group = 0.03283912)
+plotrelbias =  stack(plotrelbias)
+
+plotvar =  c( diff_gBKMR=simulation_res[3, 1], diff_lm = simulation_res[3, 3], diff_gform = simulation_res[3, 2], gfrom_correct = simulation_res[3, 4],gBKMR_nosel =0.01848811, gBKMR_group = 0.0128606)
+plotvar =  stack(plotvar)
+
+plotmse =  c( diff_gBKMR=simulation_res[4, 1], diff_lm = simulation_res[4, 3], diff_gform = simulation_res[4, 2], gfrom_correct = simulation_res[4, 4],gBKMR_nosel = 0.01850737, gBKMR_group = 0.01342087)
+plotmse =  stack(plotmse)
+
+plotcoverage =  c( diff_gBKMR = coverage_gBKMR , diff_lm = coverage_lm, diff_gform = coverage_gfun, gfrom_correct = coverage_gfuncorr, gBKMR_nosel = 0.988, gBKMR_group =0.91)
+plotcoverage =  stack(plotcoverage )
+
+
+p1 = ggplot(plotbias, aes(x = ind, y = values)) + 
+  geom_point(position = position_dodge(width = 0.75), color = c("black","dodgerblue3","darkseagreen4","orange2", "gray25","firebrick2")) + labs( col="method", y="Bias", title="")+
+  ylim(-.5,1)+ theme(legend.position = "none") + theme_bw() + geom_hline(yintercept=0, linetype="dashed", color = "red")+ theme( axis.title.x = element_blank())
+
+p2 = ggplot(plotrelbias, aes(x = ind, y = values)) +
+  geom_point(position = position_dodge(width = 0.75),color = c("black","dodgerblue3","darkseagreen4","orange2", "gray25","firebrick2")) + labs(  col="method", y="Relative Bias", title="")+  scale_color_manual(values = col)+
+  ylim(-1,1.2)+ theme(legend.position = "none") + theme_bw() + geom_hline(yintercept=0, linetype="dashed", color = "red")+ theme( axis.title.x = element_blank())   
+
+p3 = ggplot(plotvar, aes(x = ind, y = values)) +
+  geom_point(position = position_dodge(width = 0.75), color = c("black","dodgerblue3","darkseagreen4","orange2", "gray25","firebrick2")) + labs(  col="method", y="Variance", title="")+
+  ylim(-.1,.12)+ theme(legend.position = "none") + theme_bw() + geom_hline(yintercept=0, linetype="dashed", color = "red")+ theme( axis.title.x = element_blank())   
+
+p4 = ggplot(plotmse, aes(x = ind, y = values)) +
+  geom_point(position = position_dodge(width = 0.75), color = c("black","dodgerblue3","darkseagreen4","orange2", "gray25","firebrick2")) +
+  labs(  col="method", y="MSE", title="")+  scale_color_manual(values = col)+
+  ylim(-.1,1)+ theme(legend.position = "none") + theme_bw()+ geom_hline(yintercept=0, linetype="dashed", color = "red")+ theme( axis.title.x = element_blank())    
+
+
+p5 = ggplot(plotcoverage, aes(x = ind, y = values)) +
+  geom_point(position = position_dodge(width = 0.75), color = c("black","dodgerblue3","darkseagreen4","orange2", "gray25","firebrick2")) +
+  labs(  col="method", y="Coverage", title="")+  scale_color_manual(values = col)+
+  ylim(-.1,1)+ theme(legend.position = "none") + theme_bw()+ geom_hline(yintercept=0, linetype="dashed", color = "red")+ theme( axis.title.x = element_blank())     
+
+library(cowplot) 
+plot_grid(p1,  p2 ,p3, p4, p5, align = "h", axis = "tb",
+  nrow = 5
+  )
+
+plotbias
+plotmse
+plotcoverage
+
+```
+
+```{r}
+scenario1_bias= plotbias
+scenario1_mse = plotmse
+scenario1_coverage= plotcoverage
+save(scenario1_bias, scenario1_mse, scenario1_coverage, file = "all_plotdat_s1.Rdata" )
+```
+ 
+
+# Check credible interval for a few simulations
+
+```{r}
+library(tidyr)
+dat_sim = sim_popn[sample(sim_popn$id, 500, replace=F),]   
+
+ggplot(gather(dat_sim[, c('sex','waist0', 'waist1', 'Y', 'logM1_0', "logM2_0", "logM3_0", "logM1_1", "logM2_1", "logM3_1")]), aes(value)) + 
+    geom_histogram(bins = 10) + 
+    facet_wrap(~key, scales = 'free_x') 
+```
+
+```{r}
+YaLa <- readRDS("YaLa_450.rds") 
+YastarLastar <- readRDS("YastarLastar_450.rds")
+  diff_tmp = YastarLastar - YaLa
+upper = quantile(diff_tmp, .975) 
+  lower = quantile(diff_tmp, .025) 
+c(lower, upper)
+```
+```{r}
+YaLa <- readRDS("YaLa_1.rds") 
+YastarLastar <- readRDS("YastarLastar_1.rds")
+  diff_tmp = YastarLastar - YaLa
+upper = quantile(diff_tmp, .975) 
+  lower = quantile(diff_tmp, .025) 
+c(lower, upper)
+```
+
+```{r}
+YaLa <- readRDS("YaLa_4.rds") 
+YastarLastar <- readRDS("YastarLastar_4.rds")
+  diff_tmp = YastarLastar - YaLa
+upper = quantile(diff_tmp, .975) 
+  lower = quantile(diff_tmp, .025) 
+c(lower, upper)
+```
+
+
+
+
+# Check the distribution of the Baseline Covarites
+
+g-BKMR gives accurate estimates of the baseline covariates in both models. 
+
+Estimates for sex, waist0 in Model1 (model for L)
+
+The truth is 0, 0.25
+```{r }
+para = apply(para_res, 2, mean)
+
+para_l1 = apply(para_res, 2, mean)[1:2] 
+para_y = apply(para_res, 2, mean)[3:4]
+
+
+para_l1 
+```
+
+ Estimates for sex, waist0 in Model2 (model for Y)
+ 
+ The truth is  0.25, 0
+```{r}
+ 
+para_y
+ 
+#hist(para_res[,2])
+#hist(para_res[,3]) 
+```
+
+The histogram of the estimates looks normal. (which is good.)
+
+### Check the distribution of the h function estimates
+The estimates of h functions seemed close to the truth. 
+
+```{r}
+
+  l1_est_logM1_0 = c(NA, 50)
+  l1_est_logM2_0 = c(NA, 50)
+  l1_est_logM3_0 = c(NA, 50)
+   
+  y_est_logM1_0 = c(NA, 50)
+  y_est_logM2_0 = c(NA, 50)
+  y_est_logM3_0 = c(NA, 50)
+  y_est_logM1_1 = c(NA, 50)
+  y_est_logM2_1 = c(NA, 50)
+  y_est_logM3_1 = c(NA, 50) 
+  y_est_waist_1 = c(NA, 50) 
+ 
+ for (i in 1:500) {
+  file1 = paste0("risks_singvar_l1_", i,".rds") 
+# file2 = paste0("risks_singvar_l2_", i,".rds")  
+  file3 = paste0("risks_singvar_y_", i,".rds")  
+   path1 = file.path(file1)
+         path3 = file.path(file3)
+  if(file.exists(path1)==FALSE)   {
+    next
+  }
+
+     if(file.exists(path3)==FALSE)   {
+    next
+  }
+  df1 = readRDS(file1)
+#  df2 = readRDS(file2)
+  df3 = readRDS(file3)
+  
+  l1_est_logM1_0[i] = as.numeric(filter(df1, q.fixed ==0.5, variable == 'logM1_0')[3])
+  l1_est_logM2_0[i] = as.numeric(filter(df1, q.fixed ==0.5, variable == 'logM2_0')[3])
+  l1_est_logM3_0[i] = as.numeric(filter(df1, q.fixed ==0.5, variable == 'logM3_0')[3])
+  
+  # l2_est_logM1_1[i] = as.numeric(filter(df2, q.fixed ==0.5, variable == 'logM1_1')[3])
+  # l2_est_logM2_1[i] = as.numeric(filter(df2, q.fixed ==0.5, variable == 'logM2_1')[3])
+  # l2_est_logM3_1[i] = as.numeric(filter(df2, q.fixed ==0.5, variable == 'logM3_1')[3])  
+  # l2_est_waist_1[i] = as.numeric(filter(df2, q.fixed ==0.5, variable == 'waist1')[3])  
+  # 
+  y_est_logM1_0[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM1_0')[3])
+  y_est_logM2_0[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM2_0')[3])
+  y_est_logM3_0[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM3_0')[3])  
+  
+  y_est_logM1_1[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM1_1')[3])
+  y_est_logM2_1[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM2_1')[3])
+  y_est_logM3_1[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'logM3_1')[3])  
+  y_est_waist_1[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'waist1')[3])  
+ # y_est_waist_2[i] = as.numeric(filter(df3, q.fixed ==0.5, variable == 'waist2')[3])  
+   
+ }
+```
+
+
+```{r}  
+par(mfrow=c(1,3))
+ hist(l1_est_logM1_0)
+ hist(l1_est_logM2_0)
+ hist(l1_est_logM3_0) 
+
+h_gbkmr_est_l1 <- c(mean(l1_est_logM1_0, na.rm=T), mean(l1_est_logM2_0, na.rm=T),mean(l1_est_logM3_0, na.rm=T))
+
+change_logM1_0 <-quantile(sim_popn$logM1_0, .75) - quantile(sim_popn$logM1_0, .25)
+h_truth_l1 <- 1/4*c(change_logM1_0, 0, 0)
+
+df_h_1 <- as.data.frame(rbind(h_gbkmr_est_l1, h_truth_l1))
+colnames(df_h_1) <-c("logM1_0", "logM2_0", "logM3_0"  )
+
+kable(df_h_1)
+
+par(mfrow=c(1,4))
+ hist(y_est_logM1_1)
+ hist(y_est_logM2_1)
+ hist(y_est_logM3_1)
+ hist(y_est_waist_1) 
+
+  
+
+h_gbkmr_est_y <- c(mean(y_est_logM1_0, na.rm=T), mean(y_est_logM2_0, na.rm=T),mean(y_est_logM3_0, na.rm=T),mean(y_est_logM1_1, na.rm=T), mean(y_est_logM2_1, na.rm=T),mean(y_est_logM3_1, na.rm=T), mean(y_est_waist_1, na.rm=T))
+
+change_logM1_0 <-quantile(sim_popn$logM1_0, .75) - quantile(sim_popn$logM1_0, .25)
+change_logM2_1 <-quantile(sim_popn$logM2_1, .75) - quantile(sim_popn$logM2_1, .25)
+change_waist_1 <-quantile(sim_popn$waist1, .75) - quantile(sim_popn$waist1, .25)
+
+
+h_truth_y <- c(1/4*change_logM1_0, 0, 0, 0, 1/4*change_logM2_1  , 0,1/4*change_waist_1)
+
+df_h_y <- as.data.frame(rbind(h_gbkmr_est_y, h_truth_y))
+colnames(df_h_y) <-c("logM1_0", "logM2_0", "logM3_0", "logM1_1", "logM2_1", "logM3_1", "waist1"  )
+kable(df_h_y) 
+```
+
+
+# Appendix: Simulation code on cluster
+
+```{r eval = FALSE}
+args<-commandArgs(TRUE)
+currind <-as.integer(args[1])
+print(currind)
+
+library(bkmr)
+library(data.table)
+library(CBPS)
+library(dplyr)
+
+sim_popn = readRDS("popn_lowcor_linearLY.rds")
+n = 500
+
+#############################################
+#          g-BKMR
+#############################################
+sel<-seq(10000,12000,by=25)
+
+sim_res = rep(NA, 3)
+ 
+set.seed(currind)
+dat_sim = sim_popn[sample(sim_popn$id, n, replace=F),]  
+
+L1 = dat_sim$waist1
+
+Cov_mat_l1 = dplyr::select(dat_sim,   sex,  waist0 )
+Exp_mat_l1 = dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0 )
+
+ 
+
+Y = dat_sim$Y
+Cov_mat_y = dplyr::select(dat_sim,sex,  waist0 )
+Exp_mat_y= dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0, 
+                         logM1_1, logM2_1, logM3_1 , waist1  )
+
+
+  fitkm_l1 <- kmbayes(y = L1, Z = Exp_mat_l1, X = Cov_mat_l1, iter = 12000, verbose = FALSE, varsel = TRUE) 
+ saveRDS(fitkm_l1, file = paste0("fitkm_l1_", currind, ".rds"))
+ #  
+ # 
+  fitkm_y <- kmbayes(y = Y, Z = Exp_mat_y, X = Cov_mat_y, iter = 12000, verbose = FALSE, varsel = TRUE) 
+ saveRDS(fitkm_y, file = paste0("fitkm_y_", currind, ".rds")) 
+
+#fitkm_l1 <- readRDS(paste0("fitkm_l1_", currind, ".rds"))
+# fitkm_l2 <- readRDS(paste0("fitkm_l2_", currind, ".rds"))
+#fitkm_y <- readRDS(paste0("fitkm_y_", currind, ".rds"))
+
+  start.time <- proc.time()
+K = 1000
+
+ A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+
+a <-   apply(A, 2, quantile, probs=0.25)
+astar <-   apply(A, 2, quantile, probs=0.75)
+
+# Calculate L_a*
+
+X.predict.L <- matrix(colMeans(Cov_mat_l1),nrow=1)
+X.predict.Y <- matrix(colMeans(Cov_mat_y),nrow=1)
+
+newz      <- rbind(a,astar)
+set.seed(93020)
+EL1.samp <- SamplePred(fitkm_l1, Znew =newz[,1:3], Xnew = X.predict.L, sel=sel)
+L1a       <- as.vector(EL1.samp[,"znew1"])
+L1astar   <- as.vector(EL1.samp[,"znew2"])
+
+sigma.samp   <- sqrt(fitkm_l1$sigsq.eps[sel])
+set.seed(93020)
+random.samp1 <- matrix(rnorm(length(sel)*K),nrow=length(sel),ncol=K)
+random.samp2 <- matrix(rnorm(length(sel)*K),nrow=length(sel),ncol=K)
+
+L1a.samp     <- L1a + sigma.samp*random.samp1
+L1astar.samp <- L1astar + sigma.samp*random.samp2
+
+YaLa.samp.mat <- matrix(NA,nrow=length(sel),ncol=K)
+YastarLastar.samp.mat <- matrix(NA,nrow=length(sel),ncol=K)
+  
+
+for(j in 1:length(sel)){
+  print(j)
+  L1a.j     <- L1a.samp[j,]
+  L1astar.j <- L1astar.samp[j,]
+  
+  aL1a.j         <- cbind(matrix(a, nrow=K, ncol=length(a), byrow=TRUE), L1a.j) 
+  astarL1astar.j <- cbind(matrix(astar, nrow=K, ncol=length(astar), byrow=TRUE), L1astar.j) 
+  
+  for(k in 1:K){
+    newz <- rbind(aL1a.j[k,], astarL1astar.j[k,])
+    
+    set.seed(j + 10000)
+    Y.jk <- SamplePred(fitkm_y, Znew = newz, Xnew = X.predict.Y, sel=sel[j])
+    
+    YaLa.samp.mat[j,k]<- Y.jk[,"znew1"]
+    YastarLastar.samp.mat[j,k]<- Y.jk[,"znew2"] 
+    
+  }   
+  end.time.temp <- proc.time() 
+  if(j%%50==0) print(paste("iter", j, "time: ", round((end.time.temp - start.time)["elapsed"]/60,2),"min")) 
+}
+
+
+YaLa         <- apply(YaLa.samp.mat,        1,mean)
+YastarLastar <- apply(YastarLastar.samp.mat,1,mean)
+
+saveRDS( YaLa, paste0("YaLa_", currind, ".rds"))
+saveRDS( YastarLastar, paste0("YastarLastar_", currind, ".rds"))
+
+##g-BKMR
+diff_gBKMR = mean(YastarLastar) - mean(YaLa) 
+
+para_l1 = apply(fitkm_l1$beta[6000:12000,],2,mean)
+#para_l2 = apply(fitkm_l2$beta[40000:50000,],2,mean)
+para_y = apply(fitkm_y$beta[6000:12000,],2,mean)
+para_l1l2y = c( para_l1,  para_y)
+
+write.csv(para_l1l2y, file = paste0("para_res", currind, ".csv")) 
+
+
+#############################################
+#      Parametric g-formula
+#############################################
+
+lm_l1 <-  lm(waist1 ~  as.factor(sex)   +waist0 +
+                  logM1_0+logM2_0+logM3_0 , dat = dat_sim)
+
+lm_y <-  lm(Y ~  as.factor(sex)   +waist0 +waist1 +
+               logM1_0+logM2_0+logM3_0+logM1_1+logM2_1+logM3_1 , dat = dat_sim)
+
+K = 1000
+
+A <- dplyr::select(dat_sim, logM1_0, logM2_0, logM3_0,  logM1_1, logM2_1, logM3_1)
+
+a <-   apply(A, 2, quantile, probs=0.25)
+astar <-   apply(A, 2, quantile, probs=0.75)
+
+# Calculate L_a*
+
+tmp = rbind(c(0, mean(dat_sim$waist0), a[1:3]), 
+              c(0, mean(dat_sim$waist0), astar[1:3])) 
+
+
+newdat_l1 = as.data.frame(tmp)
+colnames(newdat_l1) <- c("sex", "waist0", 'logM1_0', 'logM2_0' ,'logM3_0')
+La.true <- predict(lm_l1, newdata = newdat_l1)[1]
+Lastar.true <- predict(lm_l1, newdata = newdat_l1)[2]
+
+K = 1000
+sigma.samp   <- summary(lm_l1)$sigma
+
+La.samp      <- La.true     + rnorm(K, sd=sigma.samp) 
+Lastar.samp  <- Lastar.true + rnorm(K, sd=sigma.samp) 
+
+ 
+YaLa.samp         <- cbind(0, mean(dat_sim$waist0), La.samp,     matrix(a, nrow=K, ncol=length(a), byrow=TRUE))
+YastarLastar.samp <- cbind(0, mean(dat_sim$waist0), Lastar.samp, matrix(astar, nrow=K, ncol=length(a), byrow=TRUE))
+
+newdat_YaLa <- as.data.frame(YaLa.samp)
+colnames(newdat_YaLa) <- c("sex", "waist0",'waist1', 'logM1_0', 'logM2_0' ,'logM3_0', 'logM1_1', 'logM2_1','logM3_1')
+
+newdat_YastarLastar <- as.data.frame(YastarLastar.samp)
+colnames(newdat_YastarLastar) <- c("sex", "waist0",'waist1', 'logM1_0', 'logM2_0' ,'logM3_0', 'logM1_1', 'logM2_1','logM3_1')
+
+
+YaLa.pred   <- predict(lm_y, newdata = newdat_YaLa)
+Lastar.pred <- predict(lm_y, newdata = newdat_YastarLastar)
+
+YaLa         <- mean(YaLa.pred)
+YastarLastar <- mean(YastarLastar)
+
+diff_gform = mean(YastarLastar) - mean(YaLa)  
+
+
+#############################################
+#      Linear Regression
+#############################################
+
+# df_lm = dplyr::mutate(dat_sim, 
+#                       glucose0 = glucose0 - mean(glucose0), 
+#                        waist0 =  waist0 - mean(waist0), waist1 = waist1 - mean(waist1) , 
+#                        age = age - mean(age))
+
+
+
+lm_model = lm(Y ~  as.factor(sex)   +waist0 +waist1 +
+                logM1_0+logM2_0+logM3_0+logM1_1+logM2_1+logM3_1 , dat = dat_sim)
+summary(lm_model)
+newdat_25 <- data.frame(  sex = as.factor(0), 
+                        logM1_0 = quantile(dat_sim$logM1_0)[2],
+                        logM1_1 = quantile(dat_sim$logM1_1)[2], 
+                        logM2_0 = quantile(dat_sim$logM2_0)[2],
+                        logM2_1 = quantile(dat_sim$logM2_1)[2], 
+                        logM3_0 = quantile(dat_sim$logM3_0)[2],
+                        logM3_1 = quantile(dat_sim$logM3_1)[2], 
+                        waist0 = mean(dat_sim$waist0),
+                        waist1 = mean(dat_sim$waist1) 
+)
+
+newdat_75 <- data.frame( sex = as.factor(0), 
+                        logM1_0 = quantile(dat_sim$logM1_0)[4],
+                        logM1_1 = quantile(dat_sim$logM1_1)[4], 
+                        logM2_0 = quantile(dat_sim$logM2_0)[4],
+                        logM2_1 = quantile(dat_sim$logM2_1)[4], 
+                        logM3_0 = quantile(dat_sim$logM3_0)[4],
+                        logM3_1 = quantile(dat_sim$logM3_1)[4], 
+                        waist0 = mean(dat_sim$waist0),
+                        waist1 = mean(dat_sim$waist1) )
+yhat_lm_25 = predict(lm_model, newdat_25 )
+yhat_lm_75 = predict(lm_model, newdat_75 )
+diff_lm = yhat_lm_75-yhat_lm_25 
+
+
+
+ 
+
+sim_res[1] <-  diff_gBKMR
+sim_res[2] <- diff_gform
+sim_res[3] <- diff_lm 
+ 
+write.csv(sim_res, file = paste0("Sim_res", currind, ".csv"))
+
+
+
+
+risks_singvar_l1 <- SingVarRiskSummaries(fit = fitkm_l1, y = L1, Z = Exp_mat_l1, X = as.matrix(Cov_mat_l1), 
+                                         qs.diff = c(0.25,0.75), 
+                                         q.fixed = c( 0.25, 0.5, 0.75),
+                                         method = "exact")
+saveRDS(risks_singvar_l1, file = paste0("risks_singvar_l1_", currind, ".rds")) 
+
+
+risks_singvar_y <- SingVarRiskSummaries(fit = fitkm_y, y = Y, Z = Exp_mat_y, X = as.matrix(Cov_mat_y), 
+                                        qs.diff = c(0.25,0.75), 
+                                        q.fixed = c( 0.25,0.5, 0.75),
+                                        method = "exact")
+
+saveRDS(risks_singvar_y, file = paste0("risks_singvar_y_", currind, ".rds")) 
+
+
+```

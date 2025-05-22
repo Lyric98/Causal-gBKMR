@@ -1,2 +1,6 @@
 .DS_Store
-.rds
+*.rds
+*.RData
+*.Rhistory
+*.csv
+*.xlsx

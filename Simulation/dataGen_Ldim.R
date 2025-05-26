@@ -33,8 +33,20 @@ generate_panel_data <- function(
   p <- Adim
   
   covmat <- switch(confounding,
-                   "low" = diag(p) * 0.3 + 0.7 * diag(p),
-                   "high" = diag(p) * 1 + 0.1 * (1 - diag(p))) # weakly correlated default
+                   "low" = diag(p) * 1 + 0.05 * (1 - diag(p)),  # nearly independent
+                   
+                   "high" = if (p == 3) {
+                     matrix(c(
+                       1,   0.05, 0.2,
+                       0.05, 1,   0.1,
+                       0.2,  0.1, 1
+                     ), nrow = 3, byrow = TRUE)
+                   } else {
+                     # default high correlation for p > 3
+                     toeplitz(0.5 ^ (0:(p - 1)))
+                   }
+  )
+  
   
   sigsq.trueL <- 1
   sigsq.trueY <- 1
@@ -78,8 +90,14 @@ generate_panel_data <- function(
     colnames(dat[[paste0("At", t)]]) <- paste0("At", t, "_", 1:p)
     
     hfunL <- make_hfunL(relationship_type)
-    A_t2 <- dat[[paste0("At", t)]][, 2]
-    L_input <- cbind(A_t2, prev_L[, 1])  # only first L dim interacts
+    At_curr <- dat[[paste0("At", t)]]
+    if (ncol(At_curr) >= 2) {
+      A_t2 <- At_curr[, 2]
+    } else {
+      A_t2 <- At_curr[, 1]  # fall back to the only available exposure
+    }
+    L_input <- cbind(A_t2, prev_L[, 1])
+    
     dat[[paste0("hL", t)]] <- hfunL(L_input)
     
     # All L are noisy around the same mean
@@ -106,14 +124,21 @@ generate_panel_data <- function(
     out <- 0
     for (t in 0:(T - 1)) {
       L <- z[[paste0("L", t, "_1")]]
-      M2 <- z[[paste0("At", t, "_2")]]
-      out <- out + 0.25 * M2 + 0.25 * L + 0.25 * L^2
-      if (relationship_type == "quadratic+interaction") {
-        out <- out + 0.1 * M2 * L
+      M2 <- if (paste0("At", t, "_2") %in% names(z)) {
+        z[[paste0("At", t, "_2")]]
+      } else {
+        z[[paste0("At", t, "_1")]]  # fallback if only 1 exposure
       }
+      
+      term <- 0.25 * M2 + 0.25 * L + 0.25 * L^2
+      if (relationship_type == "quadratic+interaction") {
+        term <- term + 0.1 * M2 * L
+      }
+      out <- out + term
     }
     out
   }
+  
   
   dat$hY <- apply(dat$ALL, 1, function(row) {
     row_list <- as.list(row)
@@ -137,28 +162,28 @@ generate_panel_data <- function(
   )
   df$id <- 1:k
   
-  colnames(df) <- c("sex", paste0("waist0_", 1:Ldim),
-                    unlist(lapply(0:(T - 1), function(t) paste0("logM", 1:p, "_", t))),
-                    unlist(lapply(1:(T - 1), function(t) paste0("waist", t, "_", 1:Ldim))),
-                    "Y", "id")
+  waist0_names <- if (Ldim == 1) "waist0" else paste0("waist0_", 1:Ldim)
+  waist_t_names <- if (Ldim == 1) {
+    paste0("waist", 1:(T - 1))
+  } else {
+    unlist(lapply(1:(T - 1), function(t) paste0("waist", t, "_", 1:Ldim)))
+  }
+  logM_names <- if (p == 1) {
+    paste0("logM", 0:(T - 1))
+  } else {
+    unlist(lapply(0:(T - 1), function(t) paste0("logM", 1:p, "_", t)))
+  }
   
-  corrplot(cor(df[setdiff(names(df), c("id"))][sapply(df[setdiff(names(df), c("id"))], is.numeric)]))
+  colnames(df) <- c("sex", waist0_names, logM_names, waist_t_names, "Y", "id")
+  
+  
+  corrplot(cor(df[setdiff(names(df), c("id"))][sapply(df[setdiff(names(df), c("id"))], is.numeric)]), type = "upper")
   saveRDS(df, file = paste0("popn_", T, "t_", relationship_type, "_", confounding, "_", outcome_type,
                             "_Adim", Adim, "_Ldim", Ldim, ".rds"))
   
   return(df)
 }
 
-
-df <- generate_panel_data(
-  popN = 1e6,
-  T = 5,
-  Adim = 4,
-  Ldim = 6,
-  outcome_type = "continuous",
-  relationship_type = "quadratic+interaction",
-  confounding = "high"
-)
 
 
 

@@ -1009,17 +1009,57 @@ saveRDS(risks_singvar_y, file = paste0("risks_singvar_y_", currind, ".rds"))
 
 
 ```{r}
-
-
 source('gbkmr.R')
-
 sim_popn <- readRDS("popn_3t_quadratic+interaction_high_continuous.rds")
 results <- run_gbkmr_panel(sim_popn, T = 3, currind = 1)
+```
 
 
+```{r}
+source("../dataGen_Ldim.R")  # make sure this path points to your saved file
+source("../gbkmr_Ldim.R")  # make sure this path points to your saved file
+sim_popn <- generate_panel_data(
+  popN = 1e6,
+  T = 3,
+  Adim = 3,              # 4 exposures per time point
+  Ldim = 1,              # 6-dimensional confounders
+  outcome_type = "binary",
+  relationship_type = "quadratic",
+  confounding = "high"
+)
+
+
+result <- run_gbkmr_panel(
+  sim_popn = sim_popn,
+  T = 3,
+  currind = 1,               # random seed for subsampling
+  sel = seq(2200, 2400, 25),  # MCMC iterations to keep
+  n = 500,                   # sample size
+  K = 1000,
+  iter = 2400,
+  parallel = TRUE,
+  save_exposure_preds = TRUE,
+  return_ci = TRUE,
+  make_plots = TRUE,
+  use_knots = TRUE,
+  n_knots = 50
+)
+# access output
+result$diff_gBKMR        # estimated causal effect
+result$Ya                # predicted outcomes under a
+result$Yastar            # predicted outcomes under astar
+result$beta_all          # posterior mean coefficients
+result$L_values_a        # mediator samples under a
+result$L_values_astar    # mediator samples under astar
 
 
 
 ```
+
+
+
+
+
+
 
 
